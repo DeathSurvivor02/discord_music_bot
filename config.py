@@ -8,6 +8,35 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 BOT_PREFIX = os.getenv("BOT_PREFIX", "!")
+# Locate FFmpeg binary automatically on Windows / Linux / macOS
+import shutil
+import glob
+
+def find_ffmpeg() -> str:
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    # Check WinGet installation on Windows
+    pattern = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\*ffmpeg*\*build\bin\ffmpeg.exe")
+    matches = glob.glob(pattern)
+    if matches and os.path.exists(matches[0]):
+        return matches[0]
+    pattern2 = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\**\ffmpeg.exe")
+    matches2 = glob.glob(pattern2, recursive=True)
+    if matches2 and os.path.exists(matches2[0]):
+        return matches2[0]
+    prog_files = glob.glob(r"C:\Program Files\*ffmpeg*\bin\ffmpeg.exe")
+    if prog_files and os.path.exists(prog_files[0]):
+        return prog_files[0]
+    return "ffmpeg"
+
+FFMPEG_EXECUTABLE = find_ffmpeg()
+
+# Ensure FFmpeg directory is in current process PATH
+if os.path.isabs(FFMPEG_EXECUTABLE) and os.path.exists(FFMPEG_EXECUTABLE):
+    ffmpeg_dir = os.path.dirname(FFMPEG_EXECUTABLE)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
 # FFmpeg streaming options: prevents stream aborts on packet drops
 FFMPEG_OPTIONS = {

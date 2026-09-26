@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import DISCORD_TOKEN, BOT_PREFIX, FFMPEG_OPTIONS
+from config import DISCORD_TOKEN, BOT_PREFIX, FFMPEG_OPTIONS, FFMPEG_EXECUTABLE
 from music_extractor import MusicExtractor, Song
 from music_controls import MusicControlView
 
@@ -58,7 +58,7 @@ async def play_next(guild: discord.Guild, text_channel: discord.abc.Messageable)
             print(f"[Player Error] {error}")
         asyncio.run_coroutine_threadsafe(play_next(guild, text_channel), bot.loop)
 
-    audio_source = discord.FFmpegPCMAudio(song.stream_url, **FFMPEG_OPTIONS)
+    audio_source = discord.FFmpegPCMAudio(song.stream_url, executable=FFMPEG_EXECUTABLE, **FFMPEG_OPTIONS)
     volume_source = discord.PCMVolumeTransformer(audio_source, volume=player.volume)
     vc.play(volume_source, after=after_playing)
 
