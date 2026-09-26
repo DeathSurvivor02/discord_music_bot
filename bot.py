@@ -88,6 +88,17 @@ async def on_ready():
         print(f"Successfully synced {len(synced)} slash commands.")
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    print(f"[Command Error] {error}")
+    err_text = f"❌ An error occurred: `{str(error)}`"
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(err_text, ephemeral=True)
+        else:
+            await interaction.response.send_message(err_text, ephemeral=True)
+    except Exception as e:
+        print(f"[Error Handler Exception] {e}")
 
 # ==================== SLASH COMMANDS ====================
 
@@ -101,17 +112,17 @@ async def play(interaction: discord.Interaction, query: str):
     if not user_vc or not user_vc.channel:
         return await interaction.followup.send("❌ You must join a voice channel first to use this command!")
 
-    # Connect or move bot to user's voice channel
-    vc = interaction.guild.voice_client
-    if not vc:
-        vc = await user_vc.channel.connect()
-    elif vc.channel != user_vc.channel:
-        await vc.move_to(user_vc.channel)
-
     player = get_player(interaction.guild_id)
     requester = interaction.user.display_name
 
     try:
+        # Connect or move bot to user's voice channel
+        vc = interaction.guild.voice_client
+        if not vc:
+            vc = await user_vc.channel.connect()
+        elif vc.channel != user_vc.channel:
+            await vc.move_to(user_vc.channel)
+
         # Check Spotify link
         if MusicExtractor.is_spotify_url(query):
             await interaction.followup.send("🔍 Fetching metadata from Spotify...")
