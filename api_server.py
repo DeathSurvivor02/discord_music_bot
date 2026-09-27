@@ -192,6 +192,14 @@ web_dist_path = os.path.join(os.path.dirname(__file__), "mobile_app", "dist")
 if os.path.exists(web_dist_path):
     app.mount("/", StaticFiles(directory=web_dist_path, html=True), name="mobile_web_app")
 
+@app.on_event("startup")
+async def on_startup():
+    if os.getenv("DISCORD_TOKEN") and os.getenv("RENDER"):
+        import subprocess
+        import sys
+        print("[Cloud Init] Launching Discord bot companion process...")
+        subprocess.Popen([sys.executable, "bot.py"])
+
 if __name__ == "__main__":
     local_ip = get_local_ip()
     print("=" * 60)
