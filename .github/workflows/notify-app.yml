@@ -1,0 +1,22 @@
+name: Notify Mobile App on Bot API Updates
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'api_server.py'
+      - 'requirements.txt'
+      - 'music_extractor.py'
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send API update dispatch to discord_music_app
+        uses: peter-evans/repository-dispatch@v3
+        continue-on-error: true
+        with:
+          token: ${{ secrets.SYNC_PAT || github.token }}
+          repository: DeathSurvivor02/discord_music_app
+          event-type: bot-api-updated
+          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}", "actor": "${{ github.actor }}"}'
