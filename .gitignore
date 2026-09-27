@@ -5,4 +5,8 @@ __pycache__/
 *.log
 .cache
 .cache*
-mobile_app/
+mobile_app/node_modules/
+mobile_app/.expo/
+dist/
+build/
+*.spec

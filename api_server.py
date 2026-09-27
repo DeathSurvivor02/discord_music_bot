@@ -187,6 +187,11 @@ async def get_autoplay(req: AutoplayRequest):
     )
     return {"tracks": tracks}
 
+# Serve the compiled mobile web application directly at /
+web_dist_path = os.path.join(os.path.dirname(__file__), "mobile_app", "dist")
+if os.path.exists(web_dist_path):
+    app.mount("/", StaticFiles(directory=web_dist_path, html=True), name="mobile_web_app")
+
 if __name__ == "__main__":
     local_ip = get_local_ip()
     print("=" * 60)
