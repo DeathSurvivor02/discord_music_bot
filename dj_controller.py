@@ -50,7 +50,8 @@ class DJController:
         next_song_title: str,
         requester: str,
         previous_song_title: Optional[str] = None,
-        is_first: bool = False
+        is_first: bool = False,
+        vibe: Optional[str] = None
     ) -> str:
         """Generates radio DJ commentary using Gemini or dynamic fallback templates."""
         cleaned_next = clean_track_title(next_song_title)
@@ -59,19 +60,20 @@ class DJController:
         # 1. Try generating with Gemini if available
         if self._gemini_client:
             try:
-                return await self._generate_with_gemini(cleaned_next, requester, cleaned_prev, is_first)
+                return await self._generate_with_gemini(cleaned_next, requester, cleaned_prev, is_first, vibe=vibe)
             except Exception as e:
                 print(f"[DJ Controller] Gemini script generation error: {e}. Using fallback template.")
 
         # 2. Dynamic high-quality fallback templates
-        return self._generate_fallback(cleaned_next, requester, cleaned_prev, is_first)
+        return self._generate_fallback(cleaned_next, requester, cleaned_prev, is_first, vibe=vibe)
 
     async def _generate_with_gemini(
         self,
         next_title: str,
         requester: str,
         prev_title: Optional[str],
-        is_first: bool
+        is_first: bool,
+        vibe: Optional[str] = None
     ) -> str:
         """Uses Google Gemini 3.8 Flash to write authentic radio DJ banter."""
         prompt = (
@@ -79,6 +81,8 @@ class DJController:
             f"Introduce the upcoming song in 1 to 2 punchy, conversational sentences (maximum 20-25 words).\n"
             f"- Next song: '{next_title}' requested by {requester}.\n"
         )
+        if vibe:
+            prompt += f"- Music vibe or genre requested: '{vibe}'. Mention you're locking into this vibe.\n"
         if prev_title and not is_first:
             prompt += f"- Previous song that just finished: '{prev_title}'. Smoothly bridge from it.\n"
         else:
@@ -113,9 +117,19 @@ class DJController:
         next_title: str,
         requester: str,
         prev_title: Optional[str],
-        is_first: bool
+        is_first: bool,
+        vibe: Optional[str] = None
     ) -> str:
         """Dynamic fallback radio drops when Gemini is offline or not configured."""
+        if vibe:
+            vibe_templates = [
+                f"What's good everybody, it's {self.dj_name}! Setting the mood with some {vibe} for {requester}. First track up is {next_title}—let's get into it!",
+                f"Welcome to the session, it's your boy {self.dj_name}! Locking into that {vibe} energy, starting off hot with {next_title} for {requester}. Turn it up!",
+                f"{self.dj_name} in the mix! {requester} asked for that {vibe} feel, so we're kicking off with {next_title}. Let's ride the wave!",
+                f"Aight y'all, {self.dj_name} right here. Turning on that {vibe} rotation for {requester}. Up first, {next_title}!"
+            ]
+            return random.choice(vibe_templates)
+
         if is_first or not prev_title:
             templates = [
                 f"What's good everybody, it's {self.dj_name}! Kicking things off with {next_title}, lined up by {requester}. Let's get into it!",
@@ -156,7 +170,8 @@ class DJController:
         requester: str,
         previous_song_title: Optional[str] = None,
         is_first: bool = False,
-        voice: Optional[str] = None
+        voice: Optional[str] = None,
+        vibe: Optional[str] = None
     ) -> Tuple[Optional[str], str]:
         """
         Generates the script and synthesizes the audio clip.
@@ -167,7 +182,8 @@ class DJController:
             next_song_title=next_song_title,
             requester=requester,
             previous_song_title=previous_song_title,
-            is_first=is_first
+            is_first=is_first,
+            vibe=vibe
         )
 
         output_file = os.path.join(self.cache_dir, f"dj_{guild_id}_{random.randint(1000, 9999)}.mp3")

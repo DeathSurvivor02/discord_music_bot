@@ -84,6 +84,66 @@ class MusicExtractor:
         return None
 
     @staticmethod
+    async def search_spotify_playlist(query: str, limit: int = 15) -> List[dict]:
+        """
+        Searches Spotify for a playlist or top tracks matching a genre/vibe and returns tracks.
+        """
+        if not sp:
+            return []
+
+        loop = asyncio.get_event_loop()
+        try:
+            # 1. Try finding a curated playlist first
+            results = await loop.run_in_executor(
+                None, lambda: sp.search(q=query, type='playlist', limit=3)
+            )
+            items = results.get('playlists', {}).get('items', [])
+            # Filter out None items if any
+            items = [p for p in items if p and p.get('id')]
+
+            if items:
+                playlist_id = items[0]['id']
+                p_tracks = await loop.run_in_executor(
+                    None, lambda: sp.playlist_tracks(playlist_id, limit=limit)
+                )
+                tracks_data: List[dict] = []
+                for item in p_tracks.get('items', []):
+                    track = item.get('track') if item else None
+                    if track and track.get('name'):
+                        artists = ", ".join([a['name'] for a in track.get('artists', [])])
+                        album_art = track['album']['images'][0]['url'] if track.get('album', {}).get('images') else None
+                        tracks_data.append({
+                            'title': f"{track['name']} - {artists}",
+                            'search_query': f"{track['name']} {artists}",
+                            'spotify_url': track['external_urls'].get('spotify', ''),
+                            'thumbnail': album_art,
+                            'duration': track.get('duration_ms', 0) // 1000
+                        })
+                if tracks_data:
+                    return tracks_data
+
+            # 2. Fallback: Search for top tracks directly with that genre/vibe
+            track_res = await loop.run_in_executor(
+                None, lambda: sp.search(q=query, type='track', limit=limit)
+            )
+            tracks_data = []
+            for track in track_res.get('tracks', {}).get('items', []):
+                if track and track.get('name'):
+                    artists = ", ".join([a['name'] for a in track.get('artists', [])])
+                    album_art = track['album']['images'][0]['url'] if track.get('album', {}).get('images') else None
+                    tracks_data.append({
+                        'title': f"{track['name']} - {artists}",
+                        'search_query': f"{track['name']} {artists}",
+                        'spotify_url': track['external_urls'].get('spotify', ''),
+                        'thumbnail': album_art,
+                        'duration': track.get('duration_ms', 0) // 1000
+                    })
+            return tracks_data
+        except Exception as e:
+            print(f"[Spotify Playlist Search Warning] {e}")
+            return []
+
+    @staticmethod
     async def get_spotify_queries(url: str) -> List[dict]:
         """
         Parses Spotify tracks, albums, or playlists into metadata dictionaries.

@@ -1,4 +1,7 @@
 import asyncio
+import os
+import random
+import tempfile
 from typing import Dict, Optional
 import discord
 from discord import app_commands
@@ -35,6 +38,7 @@ class GuildMusicPlayer:
         self.force_dj_next: bool = False
         self.is_dj_speaking: bool = False
         self.skip_interrupted: bool = False
+        self.active_vibe: Optional[str] = None
 
 players: Dict[int, GuildMusicPlayer] = {}
 
@@ -117,6 +121,8 @@ async def play_next(guild: discord.Guild, text_channel: discord.abc.Messageable)
     if should_dj:
         prev_title = player.previous_song.title if player.previous_song else None
         is_first = (player.previous_song is None or player.tracks_played == 1)
+        vibe_context = player.active_vibe
+        player.active_vibe = None  # Consume vibe for the opening announcement
 
         try:
             audio_path, speech_text = await dj_controller.get_dj_audio_clip(
@@ -125,7 +131,8 @@ async def play_next(guild: discord.Guild, text_channel: discord.abc.Messageable)
                 requester=song.requester,
                 previous_song_title=prev_title,
                 is_first=is_first,
-                voice=player.voice_preset
+                voice=player.voice_preset,
+                vibe=vibe_context
             )
 
             if speech_text:
@@ -244,6 +251,120 @@ async def handle_play(guild: discord.Guild, text_channel, user_vc, requester: st
     except Exception as e:
         print(f"[Play Error] {e}")
         await send_fn(f"❌ Error while loading track: `{str(e)}`")
+
+async def handle_dj_play(guild: discord.Guild, text_channel, user_vc, requester: str, vibe: Optional[str], send_fn):
+    """Starts DJ X session with a curated genre/vibe mix without needing an explicit song."""
+    player = get_player(guild.id)
+    vibe_name = vibe.strip() if vibe and vibe.strip() else "Today's Top Hits"
+
+    try:
+        vc = guild.voice_client
+        if not vc:
+            vc = await user_vc.channel.connect()
+        elif vc.channel != user_vc.channel:
+            await vc.move_to(user_vc.channel)
+
+        player.dj_enabled = True
+        player.force_dj_next = True
+        player.active_vibe = vibe_name
+
+        await send_fn(f"🎧 **{DJ_NAME}** is tuning into **{vibe_name}** for {requester}...")
+
+        # Search Spotify for playlist or top tracks
+        tracks_data = await MusicExtractor.search_spotify_playlist(vibe_name, limit=15)
+        if not tracks_data:
+            spotify_track = await MusicExtractor.search_spotify_track(vibe_name)
+            if spotify_track:
+                tracks_data = [spotify_track]
+            else:
+                songs = await MusicExtractor.extract_ytdl(vibe_name, requester)
+                if not songs:
+                    return await send_fn(f"❌ Could not find tracks for '{vibe_name}'. Try another vibe like 'hip hop' or 'pop'.")
+                player.queue.extend(songs)
+                if not vc.is_playing() and not vc.is_paused():
+                    await play_next(guild, text_channel)
+                return
+
+        first_track = tracks_data[0]
+        first_songs = await MusicExtractor.extract_ytdl(
+            first_track['search_query'],
+            requester,
+            override_title=first_track['title'],
+            override_url=first_track['spotify_url'],
+            override_thumbnail=first_track['thumbnail']
+        )
+        if not first_songs:
+            return await send_fn("❌ Failed to stream audio for that mix.")
+
+        player.queue.extend(first_songs)
+
+        async def resolve_remaining(remaining):
+            for t in remaining:
+                try:
+                    s = await MusicExtractor.extract_ytdl(
+                        t['search_query'],
+                        requester,
+                        override_title=t['title'],
+                        override_url=t['spotify_url'],
+                        override_thumbnail=t['thumbnail']
+                    )
+                    player.queue.extend(s)
+                except Exception:
+                    pass
+
+        if len(tracks_data) > 1:
+            asyncio.create_task(resolve_remaining(tracks_data[1:]))
+
+        if not vc.is_playing() and not vc.is_paused():
+            await play_next(guild, text_channel)
+
+    except Exception as e:
+        print(f"[DJ Play Error] {e}")
+        await send_fn(f"❌ Error starting DJ session: `{str(e)}`")
+
+async def handle_dj_speak(guild: discord.Guild, text_channel, user_vc, message: Optional[str], send_fn):
+    """Makes DJ X join voice and speak a radio drop or custom message without playing music."""
+    player = get_player(guild.id)
+    try:
+        vc = guild.voice_client
+        if not vc:
+            vc = await user_vc.channel.connect()
+        elif vc.channel != user_vc.channel:
+            await vc.move_to(user_vc.channel)
+
+        if not message or not message.strip():
+            drops = [
+                f"Check mic, check 1 2. This is {DJ_NAME} live on the decks. Let's make some noise!",
+                f"What's good everybody, it's {DJ_NAME} in the building! Who's ready for some good tunes?",
+                f"Yo, it's your boy {DJ_NAME}! Drop your requests in the chat and let's get the party started."
+            ]
+            message = random.choice(drops)
+
+        temp_audio = os.path.join(tempfile.gettempdir(), f"dj_speak_{guild.id}_{random.randint(1000, 9999)}.mp3")
+        success = await dj_controller.synthesize_speech(message, temp_audio, voice=player.voice_preset)
+
+        if not success:
+            return await send_fn("❌ Failed to synthesize DJ voice.")
+
+        embed = discord.Embed(
+            description=f"🎙️ **{DJ_NAME} on the mic:**\n*\"{message}\"*",
+            color=discord.Color.from_rgb(30, 215, 96)
+        )
+        await send_fn(embed=embed)
+
+        def after_speak(error):
+            dj_controller.cleanup_file(temp_audio)
+            if error:
+                print(f"[DJ Speak Error] {error}")
+
+        if vc.is_playing():
+            vc.stop()
+
+        vc.play(discord.FFmpegPCMAudio(temp_audio, executable=FFMPEG_EXECUTABLE), after=after_speak)
+
+    except Exception as e:
+        print(f"[DJ Speak Error] {e}")
+        await send_fn(f"❌ Error: `{str(e)}`")
 
 @bot.event
 async def on_ready():
@@ -387,56 +508,88 @@ async def volume(interaction: discord.Interaction, percent: int):
 
     await interaction.response.send_message(f"🔊 Volume set to **{percent}%**.")
 
-@bot.tree.command(name="dj", description="Manage Spotify-style AI DJ commentary")
-@app_commands.describe(
-    action="Choose an action: toggle, drop, frequency, voice, or status",
-    value="Optional setting: number for frequency (e.g. 2) or voice name (christopher, eric, etc.)"
-)
-@app_commands.choices(action=[
-    app_commands.Choice(name="Toggle ON/OFF", value="toggle"),
-    app_commands.Choice(name="Force DJ Drop (speak before next track)", value="drop"),
-    app_commands.Choice(name="Set Frequency (every N tracks)", value="frequency"),
-    app_commands.Choice(name="Change Voice", value="voice"),
-    app_commands.Choice(name="Status / Settings", value="status")
-])
-async def dj_command(interaction: discord.Interaction, action: app_commands.Choice[str], value: Optional[str] = None):
+dj_group = app_commands.Group(name="dj", description="Manage Spotify-style AI DJ commentary & playback")
+
+@dj_group.command(name="play", description="Start DJ X with a curated vibe, genre, or playlist from scratch")
+@app_commands.describe(vibe="Music genre, mood, or artist (e.g. 'hip hop', 'chill', 'rock', 'pop', 'today's hits')")
+async def dj_sub_play(interaction: discord.Interaction, vibe: Optional[str] = "Today's Top Hits"):
+    await interaction.response.defer()
+    user_vc = interaction.user.voice
+    if not user_vc or not user_vc.channel:
+        return await interaction.followup.send("❌ You must join a voice channel first to use this command!")
+    await handle_dj_play(interaction.guild, interaction.channel, user_vc, interaction.user.display_name, vibe, interaction.followup.send)
+
+@dj_group.command(name="speak", description="Make DJ X speak a custom message or radio drop in voice")
+@app_commands.describe(message="What you want DJ X to say on the microphone (optional radio drop if empty)")
+async def dj_sub_speak(interaction: discord.Interaction, message: Optional[str] = None):
+    await interaction.response.defer()
+    user_vc = interaction.user.voice
+    if not user_vc or not user_vc.channel:
+        return await interaction.followup.send("❌ You must join a voice channel first to use this command!")
+    await handle_dj_speak(interaction.guild, interaction.channel, user_vc, message, interaction.followup.send)
+
+@dj_group.command(name="toggle", description="Toggle AI DJ commentary on/off")
+async def dj_sub_toggle(interaction: discord.Interaction):
     player = get_player(interaction.guild_id)
-    choice = action.value
+    player.dj_enabled = not player.dj_enabled
+    state = "Enabled" if player.dj_enabled else "Disabled"
+    await interaction.response.send_message(f"🎧 AI DJ commentary is now **{state}**.")
 
-    if choice == "toggle":
-        player.dj_enabled = not player.dj_enabled
-        state = "Enabled" if player.dj_enabled else "Disabled"
-        return await interaction.response.send_message(f"🎧 AI DJ commentary is now **{state}**.")
+@dj_group.command(name="drop", description="Force DJ X to take the mic before the next track")
+async def dj_sub_drop(interaction: discord.Interaction):
+    player = get_player(interaction.guild_id)
+    player.force_dj_next = True
+    await interaction.response.send_message(f"🎙️ **{DJ_NAME}** will take the mic before the next track!")
 
-    elif choice == "drop":
-        player.force_dj_next = True
-        return await interaction.response.send_message(f"🎙️ **{DJ_NAME}** will take the mic before the next track!")
+@dj_group.command(name="frequency", description="Set how many tracks play between DJ commentary")
+@app_commands.describe(count="Number of tracks (e.g. 2 for every 2 tracks)")
+async def dj_sub_frequency(interaction: discord.Interaction, count: int):
+    if count < 1:
+        return await interaction.response.send_message("❌ Frequency must be at least 1.", ephemeral=True)
+    player = get_player(interaction.guild_id)
+    player.dj_frequency = count
+    await interaction.response.send_message(f"📻 **{DJ_NAME}** will now speak every **{player.dj_frequency}** track(s).")
 
-    elif choice == "frequency":
-        if not value or not value.isdigit() or int(value) < 1:
-            return await interaction.response.send_message("❌ Please specify a positive number for frequency (e.g. `/dj action:frequency value:2`).", ephemeral=True)
-        player.dj_frequency = int(value)
-        return await interaction.response.send_message(f"📻 **{DJ_NAME}** will now speak every **{player.dj_frequency}** track(s).")
+@dj_group.command(name="voice", description="Change DJ X voice preset")
+@app_commands.describe(preset="Select a voice preset")
+@app_commands.choices(preset=[
+    app_commands.Choice(name="Christopher (Smooth Radio Broadcaster - Closest to DJ X)", value="christopher"),
+    app_commands.Choice(name="Eric (Energetic Upbeat Male)", value="eric"),
+    app_commands.Choice(name="Guy (Casual Friendly Male)", value="guy"),
+    app_commands.Choice(name="Jenny (Warm Clear Female)", value="jenny"),
+    app_commands.Choice(name="Ryan (Smooth British Radio Host)", value="ryan"),
+    app_commands.Choice(name="Sonia (Sophisticated British Female)", value="sonia"),
+])
+async def dj_sub_voice(interaction: discord.Interaction, preset: app_commands.Choice[str]):
+    player = get_player(interaction.guild_id)
+    v_key = preset.value.lower().strip()
+    if v_key in DJ_VOICE_PRESETS:
+        player.voice_preset = DJ_VOICE_PRESETS[v_key]
+        await interaction.response.send_message(f"🎙️ DJ voice set to **{preset.name}**.")
+    else:
+        await interaction.response.send_message(f"❌ Unknown voice preset.", ephemeral=True)
 
-    elif choice == "voice":
-        if not value:
-            voices = ", ".join([f"`{k}`" for k in DJ_VOICE_PRESETS.keys()])
-            return await interaction.response.send_message(f"Available voices: {voices}. Example: `/dj action:voice value:eric`", ephemeral=True)
-        v_key = value.lower().strip()
-        if v_key in DJ_VOICE_PRESETS:
-            player.voice_preset = DJ_VOICE_PRESETS[v_key]
-            return await interaction.response.send_message(f"🎙️ DJ voice set to **{v_key.capitalize()}**.")
-        else:
-            return await interaction.response.send_message(f"❌ Unknown voice preset. Choose from: {', '.join(DJ_VOICE_PRESETS.keys())}", ephemeral=True)
+@dj_group.command(name="status", description="Show active DJ settings")
+async def dj_sub_status(interaction: discord.Interaction):
+    player = get_player(interaction.guild_id)
+    state = "Enabled" if player.dj_enabled else "Disabled"
+    voice_name = player.voice_preset or "Default (Christopher - DJ X)"
+    embed = discord.Embed(title=f"🎙️ {DJ_NAME} Status", color=discord.Color.from_rgb(30, 215, 96))
+    embed.add_field(name="State", value=f"**{state}**", inline=True)
+    embed.add_field(name="Frequency", value=f"Every **{player.dj_frequency}** track(s)", inline=True)
+    embed.add_field(name="Voice", value=f"`{voice_name}`", inline=True)
+    await interaction.response.send_message(embed=embed)
 
-    elif choice == "status":
-        state = "Enabled" if player.dj_enabled else "Disabled"
-        voice_name = player.voice_preset or "Default (Christopher)"
-        embed = discord.Embed(title=f"🎙️ {DJ_NAME} Status", color=discord.Color.from_rgb(30, 215, 96))
-        embed.add_field(name="State", value=f"**{state}**", inline=True)
-        embed.add_field(name="Frequency", value=f"Every **{player.dj_frequency}** track(s)", inline=True)
-        embed.add_field(name="Voice", value=f"`{voice_name}`", inline=True)
-        return await interaction.response.send_message(embed=embed)
+bot.tree.add_command(dj_group)
+
+@bot.tree.command(name="djplay", description="Quick shortcut: Start DJ X with a curated vibe or genre")
+@app_commands.describe(vibe="Music genre or vibe (e.g. 'hip hop', 'chill', 'rock', 'pop', 'today's hits')")
+async def standalone_djplay(interaction: discord.Interaction, vibe: Optional[str] = "Today's Top Hits"):
+    await interaction.response.defer()
+    user_vc = interaction.user.voice
+    if not user_vc or not user_vc.channel:
+        return await interaction.followup.send("❌ You must join a voice channel first to use this command!")
+    await handle_dj_play(interaction.guild, interaction.channel, user_vc, interaction.user.display_name, vibe, interaction.followup.send)
 
 # ==================== PREFIX COMMANDS (!play, etc.) ====================
 
@@ -446,6 +599,13 @@ async def prefix_play(ctx: commands.Context, *, query: str):
     if not user_vc or not user_vc.channel:
         return await ctx.send("❌ You must join a voice channel first to use this command!")
     await handle_play(ctx.guild, ctx.channel, user_vc, ctx.author.display_name, query, ctx.send)
+
+@bot.command(name="djplay", aliases=["djp"])
+async def prefix_djplay(ctx: commands.Context, *, vibe: Optional[str] = "Today's Top Hits"):
+    user_vc = ctx.author.voice
+    if not user_vc or not user_vc.channel:
+        return await ctx.send("❌ You must join a voice channel first to use this command!")
+    await handle_dj_play(ctx.guild, ctx.channel, user_vc, ctx.author.display_name, vibe, ctx.send)
 
 @bot.command(name="skip", aliases=["s"])
 async def prefix_skip(ctx: commands.Context):
@@ -514,18 +674,30 @@ async def prefix_loop(ctx: commands.Context):
 @bot.command(name="dj")
 async def prefix_dj(ctx: commands.Context, action: Optional[str] = "toggle", *, value: Optional[str] = None):
     player = get_player(ctx.guild.id)
-    action = action.lower()
+    action = action.lower() if action else "toggle"
 
-    if action in ("toggle", "t"):
+    if action in ("play", "start"):
+        user_vc = ctx.author.voice
+        if not user_vc or not user_vc.channel:
+            return await ctx.send("❌ You must join a voice channel first to use this command!")
+        await handle_dj_play(ctx.guild, ctx.channel, user_vc, ctx.author.display_name, value or "Today's Top Hits", ctx.send)
+
+    elif action in ("speak", "say", "talk"):
+        user_vc = ctx.author.voice
+        if not user_vc or not user_vc.channel:
+            return await ctx.send("❌ You must join a voice channel first to use this command!")
+        await handle_dj_speak(ctx.guild, ctx.channel, user_vc, value, ctx.send)
+
+    elif action in ("toggle", "t"):
         player.dj_enabled = not player.dj_enabled
         state = "Enabled" if player.dj_enabled else "Disabled"
         await ctx.send(f"🎧 AI DJ commentary is now **{state}**.")
 
-    elif action in ("on", "enable", "start"):
+    elif action in ("on", "enable"):
         player.dj_enabled = True
         await ctx.send(f"🎧 AI DJ commentary is now **Enabled**.")
 
-    elif action in ("off", "disable", "stop"):
+    elif action in ("off", "disable"):
         player.dj_enabled = False
         await ctx.send(f"🎧 AI DJ commentary is now **Disabled**.")
 
@@ -552,12 +724,12 @@ async def prefix_dj(ctx: commands.Context, action: Optional[str] = "toggle", *, 
 
     else:
         state = "Enabled" if player.dj_enabled else "Disabled"
-        voice_name = player.voice_preset or "Default (Christopher)"
+        voice_name = player.voice_preset or "Default (Christopher - DJ X)"
         embed = discord.Embed(title=f"🎙️ {DJ_NAME} Status", color=discord.Color.from_rgb(30, 215, 96))
         embed.add_field(name="State", value=f"**{state}**", inline=True)
         embed.add_field(name="Frequency", value=f"Every **{player.dj_frequency}** track(s)", inline=True)
         embed.add_field(name="Voice", value=f"`{voice_name}`", inline=True)
-        embed.set_footer(text="Usage: !dj [toggle|on|off|drop|freq <n>|voice <name>]")
+        embed.set_footer(text="Usage: !dj [play <vibe>|speak <msg>|toggle|on|off|drop|freq <n>|voice <name>]")
         await ctx.send(embed=embed)
 
 if __name__ == "__main__":
