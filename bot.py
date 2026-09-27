@@ -89,26 +89,64 @@ async def handle_play(guild: discord.Guild, text_channel, user_vc, requester: st
 
         if MusicExtractor.is_spotify_url(query):
             await send_fn("🔍 Fetching metadata from Spotify...")
-            search_queries = await MusicExtractor.get_spotify_queries(query)
-            if not search_queries:
+            tracks_data = await MusicExtractor.get_spotify_queries(query)
+            if not tracks_data:
                 return await send_fn("❌ No tracks found in that Spotify link.")
 
-            first_songs = await MusicExtractor.extract_ytdl(search_queries[0], requester)
+            first_track = tracks_data[0]
+            first_songs = await MusicExtractor.extract_ytdl(
+                first_track['search_query'],
+                requester,
+                override_title=first_track['title'],
+                override_url=first_track['spotify_url'],
+                override_thumbnail=first_track['thumbnail']
+            )
             player.queue.extend(first_songs)
 
             async def resolve_remaining(remaining):
-                for q in remaining:
+                for t in remaining:
                     try:
-                        songs = await MusicExtractor.extract_ytdl(q, requester)
+                        songs = await MusicExtractor.extract_ytdl(
+                            t['search_query'],
+                            requester,
+                            override_title=t['title'],
+                            override_url=t['spotify_url'],
+                            override_thumbnail=t['thumbnail']
+                        )
                         player.queue.extend(songs)
                     except Exception:
                         pass
 
-            if len(search_queries) > 1:
-                asyncio.create_task(resolve_remaining(search_queries[1:]))
+            if len(tracks_data) > 1:
+                asyncio.create_task(resolve_remaining(tracks_data[1:]))
 
-            await send_fn(f"✅ Added **{len(search_queries)} track(s)** from Spotify to queue!")
+            await send_fn(f"✅ Added **{len(tracks_data)} track(s)** from Spotify to queue!")
+
+        elif not MusicExtractor.is_youtube_url(query):
+            # Plain text search: Search Spotify catalog first!
+            spotify_track = await MusicExtractor.search_spotify_track(query)
+            if spotify_track:
+                songs = await MusicExtractor.extract_ytdl(
+                    spotify_track['search_query'],
+                    requester,
+                    override_title=spotify_track['title'],
+                    override_url=spotify_track['spotify_url'],
+                    override_thumbnail=spotify_track['thumbnail']
+                )
+                if songs:
+                    player.queue.extend(songs)
+                    await send_fn(f"🟢 **Spotify Match**: Added to queue: **[{spotify_track['title']}]({spotify_track['spotify_url']})**")
+                else:
+                    return await send_fn("❌ Failed to stream audio for that Spotify track.")
+            else:
+                # Fallback to direct YouTube search if not found on Spotify
+                songs = await MusicExtractor.extract_ytdl(query, requester)
+                if not songs:
+                    return await send_fn("❌ Could not find audio for that query.")
+                player.queue.extend(songs)
+                await send_fn(f"✅ Added to queue: **{songs[0].title}**")
         else:
+            # Direct YouTube video/playlist URL
             songs = await MusicExtractor.extract_ytdl(query, requester)
             if not songs:
                 return await send_fn("❌ Could not find audio for that query.")

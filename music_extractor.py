@@ -1,6 +1,5 @@
 import asyncio
-import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import yt_dlp as youtube_dl
@@ -47,9 +46,47 @@ class MusicExtractor:
         return "open.spotify.com" in query
 
     @staticmethod
-    async def get_spotify_queries(url: str) -> List[str]:
+    def is_youtube_url(query: str) -> bool:
+        """Checks whether the query is a direct YouTube URL."""
+        return "youtube.com" in query or "youtu.be" in query
+
+    @staticmethod
+    async def search_spotify_track(query: str) -> Optional[Dict]:
         """
-        Parses Spotify tracks, albums, or playlists into YouTube search terms.
+        Searches Spotify's catalog for the top matching track and returns its metadata.
+        """
+        if not sp:
+            return None
+
+        loop = asyncio.get_event_loop()
+        try:
+            results = await loop.run_in_executor(
+                None, lambda: sp.search(q=query, type='track', limit=1)
+            )
+            items = results.get('tracks', {}).get('items', [])
+            if items:
+                track = items[0]
+                artists = ", ".join([a['name'] for a in track.get('artists', [])])
+                album_art = None
+                if track.get('album', {}).get('images'):
+                    album_art = track['album']['images'][0]['url']
+
+                return {
+                    'title': f"{track['name']} - {artists}",
+                    'search_query': f"{track['name']} {artists}",
+                    'spotify_url': track['external_urls'].get('spotify', ''),
+                    'thumbnail': album_art,
+                    'duration': track.get('duration_ms', 0) // 1000
+                }
+        except Exception as e:
+            print(f"[Spotify Search Warning] {e}")
+
+        return None
+
+    @staticmethod
+    async def get_spotify_queries(url: str) -> List[dict]:
+        """
+        Parses Spotify tracks, albums, or playlists into metadata dictionaries.
         """
         if not sp:
             raise ValueError(
@@ -58,34 +95,64 @@ class MusicExtractor:
             )
 
         loop = asyncio.get_event_loop()
-        queries: List[str] = []
+        tracks_data: List[dict] = []
 
         if "/track/" in url:
             track = await loop.run_in_executor(None, lambda: sp.track(url))
-            artist_name = track['artists'][0]['name'] if track['artists'] else ""
-            queries.append(f"{track['name']} {artist_name}")
+            artists = ", ".join([a['name'] for a in track.get('artists', [])])
+            album_art = track['album']['images'][0]['url'] if track.get('album', {}).get('images') else None
+            tracks_data.append({
+                'title': f"{track['name']} - {artists}",
+                'search_query': f"{track['name']} {artists}",
+                'spotify_url': track['external_urls'].get('spotify', url),
+                'thumbnail': album_art,
+                'duration': track.get('duration_ms', 0) // 1000
+            })
 
         elif "/playlist/" in url:
             results = await loop.run_in_executor(None, lambda: sp.playlist_tracks(url))
             for item in results.get('items', []):
                 track = item.get('track')
                 if track:
-                    artist_name = track['artists'][0]['name'] if track['artists'] else ""
-                    queries.append(f"{track['name']} {artist_name}")
+                    artists = ", ".join([a['name'] for a in track.get('artists', [])])
+                    album_art = track['album']['images'][0]['url'] if track.get('album', {}).get('images') else None
+                    tracks_data.append({
+                        'title': f"{track['name']} - {artists}",
+                        'search_query': f"{track['name']} {artists}",
+                        'spotify_url': track['external_urls'].get('spotify', ''),
+                        'thumbnail': album_art,
+                        'duration': track.get('duration_ms', 0) // 1000
+                    })
 
         elif "/album/" in url:
             results = await loop.run_in_executor(None, lambda: sp.album_tracks(url))
-            album_artist = results.get('items', [{}])[0].get('artists', [{}])[0].get('name', '')
-            for track in results.get('items', []):
-                queries.append(f"{track['name']} {album_artist}")
+            album_info = await loop.run_in_executor(None, lambda: sp.album(url))
+            album_art = album_info['images'][0]['url'] if album_info.get('images') else None
+            album_artist = album_info.get('artists', [{}])[0].get('name', '')
 
-        return queries
+            for track in results.get('items', []):
+                artists = ", ".join([a['name'] for a in track.get('artists', [])]) or album_artist
+                tracks_data.append({
+                    'title': f"{track['name']} - {artists}",
+                    'search_query': f"{track['name']} {artists}",
+                    'spotify_url': track['external_urls'].get('spotify', ''),
+                    'thumbnail': album_art,
+                    'duration': track.get('duration_ms', 0) // 1000
+                })
+
+        return tracks_data
 
     @staticmethod
-    async def extract_ytdl(query: str, requester: str) -> List[Song]:
+    async def extract_ytdl(
+        query: str,
+        requester: str,
+        override_title: Optional[str] = None,
+        override_url: Optional[str] = None,
+        override_thumbnail: Optional[str] = None
+    ) -> List[Song]:
         """
-        Extracts stream URL and metadata using yt-dlp.
-        Supports direct URLs and plain-text search terms.
+        Extracts stream URL using yt-dlp.
+        Supports direct URLs and plain-text search terms, with optional Spotify metadata override.
         """
         loop = asyncio.get_event_loop()
         is_url = query.startswith("http://") or query.startswith("https://")
@@ -97,26 +164,25 @@ class MusicExtractor:
 
         songs: List[Song] = []
         if 'entries' in data and data['entries']:
-            # Either a playlist or a search query
             entries = data['entries'] if is_url else [data['entries'][0]]
             for entry in entries:
                 if not entry:
                     continue
                 songs.append(Song(
-                    title=entry.get('title', 'Unknown Title'),
-                    source_url=entry.get('webpage_url', query),
+                    title=override_title or entry.get('title', 'Unknown Title'),
+                    source_url=override_url or entry.get('webpage_url', query),
                     stream_url=entry.get('url', ''),
                     duration=entry.get('duration', 0),
-                    thumbnail=entry.get('thumbnail', None),
+                    thumbnail=override_thumbnail or entry.get('thumbnail', None),
                     requester=requester
                 ))
         else:
             songs.append(Song(
-                title=data.get('title', 'Unknown Title'),
-                source_url=data.get('webpage_url', query),
+                title=override_title or data.get('title', 'Unknown Title'),
+                source_url=override_url or data.get('webpage_url', query),
                 stream_url=data.get('url', ''),
                 duration=data.get('duration', 0),
-                thumbnail=data.get('thumbnail', None),
+                thumbnail=override_thumbnail or data.get('thumbnail', None),
                 requester=requester
             ))
 
