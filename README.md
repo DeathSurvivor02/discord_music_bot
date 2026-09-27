@@ -6,6 +6,7 @@ A feature-rich Discord music bot built with **discord.py (v2.x)**, **yt-dlp**, a
 
 ## ✨ Features
 
+- 🎙️ **Spotify-Style AI DJ ("DJ X")**: Dynamic radio commentary spoken directly into your voice channel before tracks! Powered by neural text-to-speech with optional Google Gemini banter generation and customizable voice presets.
 - 🎧 **YouTube Streaming**: Stream any YouTube video, playlist, or plain-text search query.
 - 🟢 **Spotify Integration**: Resolves Spotify tracks, playlists, and albums into high-quality YouTube audio streams.
 - 🎛️ **Interactive Controls**: Buttons directly on the "Now Playing" embed:
@@ -14,7 +15,8 @@ A feature-rich Discord music bot built with **discord.py (v2.x)**, **yt-dlp**, a
   - ⏹️ **Stop & Disconnect**
   - 🔁 **Repeat / Loop**
   - 📜 **Queue Preview**
-- ⚡ **Slash Commands**: Modern Discord commands (`/play`, `/skip`, `/stop`, `/nowplaying`, `/queue`, `/loop`, `/volume`).
+  - 🎧 **DJ: ON / OFF Toggle**
+- ⚡ **Slash Commands**: Modern Discord commands (`/play`, `/skip`, `/stop`, `/nowplaying`, `/queue`, `/loop`, `/volume`, `/dj`).
 - 🔊 **Volume Control**: Dynamic volume transformer (`/volume <1-100>`).
 
 ---
@@ -56,6 +58,7 @@ Fill in your API credentials in `.env`:
 - **DISCORD_TOKEN**: From [Discord Developer Portal](https://discord.com/developers/applications)
   - Ensure **Message Content Intent** and **Server Members Intent** are enabled under Privileged Gateway Intents.
 - **SPOTIFY_CLIENT_ID** & **SPOTIFY_CLIENT_SECRET**: From [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+- **GEMINI_API_KEY** *(Optional)*: From [Google AI Studio](https://aistudio.google.com/) for dynamic AI DJ commentary scriptwriting.
 
 ---
 
@@ -73,6 +76,8 @@ python bot.py
 - `/queue`: View upcoming songs in queue.
 - `/loop`: Toggle repeating the active song.
 - `/volume <1-100>`: Set playback volume.
+- `/dj <action>`: Manage AI DJ commentary (`toggle`, `drop`, `frequency`, `voice`, `status`).
+  - *Voices available*: `christopher` (default radio host), `eric` (energetic), `guy` (conversational), `jenny` (warm female), `ryan` (British radio host), `sonia` (British female).
 
 ---
 

@@ -6,6 +6,18 @@ class MusicControlView(View):
     def __init__(self, guild_music_player):
         super().__init__(timeout=None)
         self.player = guild_music_player
+        self._update_dj_button()
+
+    def _update_dj_button(self):
+        for item in self.children:
+            if getattr(item, "custom_id", None) == "music_dj_toggle":
+                if self.player.dj_enabled:
+                    item.label = "DJ: ON"
+                    item.style = discord.ButtonStyle.success
+                else:
+                    item.label = "DJ: OFF"
+                    item.style = discord.ButtonStyle.secondary
+                break
 
     @button(label="Play / Pause", style=discord.ButtonStyle.primary, emoji="⏯️", custom_id="music_play_pause")
     async def play_pause_button(self, interaction: discord.Interaction, btn: discord.ui.Button):
@@ -73,3 +85,14 @@ class MusicControlView(View):
             embed.add_field(name="Up Next", value="No upcoming songs.", inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @button(label="DJ: ON", style=discord.ButtonStyle.success, emoji="🎧", custom_id="music_dj_toggle", row=1)
+    async def dj_toggle_button(self, interaction: discord.Interaction, btn: discord.ui.Button):
+        self.player.dj_enabled = not self.player.dj_enabled
+        self._update_dj_button()
+        status = "Enabled" if self.player.dj_enabled else "Disabled"
+        try:
+            await interaction.response.edit_message(view=self)
+            await interaction.followup.send(f"🎧 AI DJ commentary is now **{status}**.", ephemeral=True)
+        except Exception:
+            await interaction.response.send_message(f"🎧 AI DJ commentary is now **{status}**.", ephemeral=True)

@@ -8,6 +8,14 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 BOT_PREFIX = os.getenv("BOT_PREFIX", "!")
+
+# Gemini API & AI DJ Settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DJ_ENABLED_BY_DEFAULT = os.getenv("DJ_ENABLED", "true").lower() in ("true", "1", "yes")
+DJ_NAME = os.getenv("DJ_NAME", "DJ X")
+DJ_VOICE = os.getenv("DJ_VOICE", "en-US-ChristopherNeural")
+DJ_DEFAULT_FREQUENCY = int(os.getenv("DJ_FREQUENCY", "2"))
+
 # Locate FFmpeg binary automatically on Windows / Linux / macOS
 import shutil
 import glob
