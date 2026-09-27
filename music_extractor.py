@@ -1,4 +1,6 @@
 import asyncio
+import random
+import re
 from typing import Dict, List, Optional
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -86,48 +88,29 @@ class MusicExtractor:
     @staticmethod
     async def search_spotify_playlist(query: str, limit: int = 15) -> List[dict]:
         """
-        Searches Spotify for a playlist or top tracks matching a genre/vibe and returns tracks.
+        Searches Spotify for top tracks matching a genre, vibe, or artist and returns tracks.
         """
         if not sp:
             return []
 
         loop = asyncio.get_event_loop()
         try:
-            # 1. Try finding a curated playlist first
+            # Query with 'hits' or plain query
+            q_clean = query.strip()
+            search_query = q_clean if any(w in q_clean.lower() for w in ["hit", "top", "best", "radio"]) else f"{q_clean} hits"
             results = await loop.run_in_executor(
-                None, lambda: sp.search(q=query, type='playlist', limit=3)
+                None, lambda: sp.search(q=search_query, type='track', limit=limit)
             )
-            items = results.get('playlists', {}).get('items', [])
-            # Filter out None items if any
-            items = [p for p in items if p and p.get('id')]
-
-            if items:
-                playlist_id = items[0]['id']
-                p_tracks = await loop.run_in_executor(
-                    None, lambda: sp.playlist_tracks(playlist_id, limit=limit)
+            items = results.get('tracks', {}).get('items', [])
+            if not items:
+                # Fallback to plain query
+                results = await loop.run_in_executor(
+                    None, lambda: sp.search(q=q_clean, type='track', limit=limit)
                 )
-                tracks_data: List[dict] = []
-                for item in p_tracks.get('items', []):
-                    track = item.get('track') if item else None
-                    if track and track.get('name'):
-                        artists = ", ".join([a['name'] for a in track.get('artists', [])])
-                        album_art = track['album']['images'][0]['url'] if track.get('album', {}).get('images') else None
-                        tracks_data.append({
-                            'title': f"{track['name']} - {artists}",
-                            'search_query': f"{track['name']} {artists}",
-                            'spotify_url': track['external_urls'].get('spotify', ''),
-                            'thumbnail': album_art,
-                            'duration': track.get('duration_ms', 0) // 1000
-                        })
-                if tracks_data:
-                    return tracks_data
+                items = results.get('tracks', {}).get('items', [])
 
-            # 2. Fallback: Search for top tracks directly with that genre/vibe
-            track_res = await loop.run_in_executor(
-                None, lambda: sp.search(q=query, type='track', limit=limit)
-            )
-            tracks_data = []
-            for track in track_res.get('tracks', {}).get('items', []):
+            tracks_data: List[dict] = []
+            for track in items:
                 if track and track.get('name'):
                     artists = ", ".join([a['name'] for a in track.get('artists', [])])
                     album_art = track['album']['images'][0]['url'] if track.get('album', {}).get('images') else None
@@ -140,7 +123,87 @@ class MusicExtractor:
                     })
             return tracks_data
         except Exception as e:
-            print(f"[Spotify Playlist Search Warning] {e}")
+            print(f"[Spotify Track Search Warning] {e}")
+            return []
+
+    @staticmethod
+    async def get_autoplay_recommendations(last_song_title: str, history: Optional[List[str]] = None, limit: int = 5) -> List[dict]:
+        """
+        Finds recommended tracks based on the last played song to keep playback endless.
+        """
+        history_lower = [h.lower() for h in (history or [])]
+        # Clean title noise
+        clean_title = re.sub(r'[\(\[][^\)\]]*(?:official|video|audio|lyrics|hd|4k|remaster|visualizer)[^\)\]]*[\)\]]', '', last_song_title, flags=re.IGNORECASE)
+        clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+
+        if sp:
+            loop = asyncio.get_event_loop()
+            try:
+                # 1. Look up track on Spotify to identify artist
+                res = await loop.run_in_executor(
+                    None, lambda: sp.search(q=clean_title, type='track', limit=1)
+                )
+                items = res.get('tracks', {}).get('items', [])
+                artist = items[0]['artists'][0]['name'] if items and items[0].get('artists') else None
+
+                search_term = f"artist:{artist}" if artist else clean_title
+                rec_res = await loop.run_in_executor(
+                    None, lambda: sp.search(q=search_term, type='track', limit=10)
+                )
+                tracks_data = []
+                for t in rec_res.get('tracks', {}).get('items', []):
+                    t_name = t.get('name', '')
+                    t_artists = ", ".join([a['name'] for a in t.get('artists', [])])
+                    full_title = f"{t_name} - {t_artists}"
+
+                    # Avoid replaying the same song or songs in history
+                    if any(h in full_title.lower() or full_title.lower() in h for h in history_lower):
+                        continue
+                    if clean_title.lower() in t_name.lower():
+                        continue
+
+                    album_art = t['album']['images'][0]['url'] if t.get('album', {}).get('images') else None
+                    tracks_data.append({
+                        'title': full_title,
+                        'search_query': f"{t_name} {t_artists}",
+                        'spotify_url': t['external_urls'].get('spotify', ''),
+                        'thumbnail': album_art,
+                        'duration': t.get('duration_ms', 0) // 1000
+                    })
+                    if len(tracks_data) >= limit:
+                        break
+
+                if tracks_data:
+                    return tracks_data
+            except Exception as e:
+                print(f"[Autoplay Spotify Warning] {e}")
+
+        # Fallback: search YouTube for related radio mix
+        loop = asyncio.get_event_loop()
+        try:
+            yt_res = await loop.run_in_executor(
+                None, lambda: ytdl.extract_info(f"ytsearch{limit + 5}:{clean_title} songs", download=False)
+            )
+            entries = yt_res.get('entries', []) if yt_res else []
+            tracks = []
+            for entry in entries:
+                if not entry:
+                    continue
+                e_title = entry.get('title', '')
+                if any(h in e_title.lower() for h in history_lower):
+                    continue
+                tracks.append({
+                    'title': e_title,
+                    'search_query': e_title,
+                    'spotify_url': entry.get('webpage_url', ''),
+                    'thumbnail': entry.get('thumbnail'),
+                    'duration': entry.get('duration', 0)
+                })
+                if len(tracks) >= limit:
+                    break
+            return tracks
+        except Exception as e:
+            print(f"[Autoplay YouTube Warning] {e}")
             return []
 
     @staticmethod

@@ -9,7 +9,8 @@ from discord.ext import commands
 
 from config import (
     DISCORD_TOKEN, BOT_PREFIX, FFMPEG_OPTIONS, FFMPEG_EXECUTABLE,
-    DJ_ENABLED_BY_DEFAULT, DJ_NAME, DJ_VOICE, DJ_DEFAULT_FREQUENCY
+    DJ_ENABLED_BY_DEFAULT, DJ_NAME, DJ_VOICE, DJ_DEFAULT_FREQUENCY,
+    AUTOPLAY_BY_DEFAULT
 )
 from music_extractor import MusicExtractor, Song
 from music_controls import MusicControlView
@@ -39,6 +40,8 @@ class GuildMusicPlayer:
         self.is_dj_speaking: bool = False
         self.skip_interrupted: bool = False
         self.active_vibe: Optional[str] = None
+        self.autoplay: bool = AUTOPLAY_BY_DEFAULT
+        self.history: list[str] = []
 
 players: Dict[int, GuildMusicPlayer] = {}
 
@@ -61,9 +64,72 @@ async def play_next(guild: discord.Guild, text_channel: discord.abc.Messageable)
     elif player.queue:
         if player.current:
             player.previous_song = player.current
+            player.history.append(player.current.title)
         song = player.queue.pop(0)
         player.current = song
         player.tracks_played += 1
+    elif player.autoplay and (player.current or player.previous_song):
+        # Endless Autoplay Mode: Queue ran dry, fetch more tracks!
+        last_played = player.current or player.previous_song
+        if player.current:
+            player.previous_song = player.current
+            player.history.append(player.current.title)
+        player.current = None
+
+        embed = discord.Embed(
+            description=f"🔄 **Autoplay**: Queue ended! DJ X is finding more tracks to keep the music playing...",
+            color=discord.Color.from_rgb(30, 215, 96)
+        )
+        await text_channel.send(embed=embed)
+
+        rec_tracks = await MusicExtractor.get_autoplay_recommendations(
+            last_song_title=last_played.title,
+            history=player.history,
+            limit=5
+        )
+
+        if rec_tracks:
+            first_t = rec_tracks[0]
+            first_songs = await MusicExtractor.extract_ytdl(
+                first_t['search_query'],
+                requester="Autoplay",
+                override_title=first_t['title'],
+                override_url=first_t['spotify_url'],
+                override_thumbnail=first_t['thumbnail']
+            )
+            if first_songs:
+                player.queue.extend(first_songs)
+
+                async def resolve_recs(remaining):
+                    for t in remaining:
+                        try:
+                            s = await MusicExtractor.extract_ytdl(
+                                t['search_query'],
+                                requester="Autoplay",
+                                override_title=t['title'],
+                                override_url=t['spotify_url'],
+                                override_thumbnail=t['thumbnail']
+                            )
+                            player.queue.extend(s)
+                        except Exception:
+                            pass
+
+                if len(rec_tracks) > 1:
+                    asyncio.create_task(resolve_recs(rec_tracks[1:]))
+
+                # Immediately proceed to play the newly queued song
+                return await play_next(guild, text_channel)
+
+        # Fallback if no recommendations could be fetched
+        player.current = None
+        player.previous_song = None
+        player.is_dj_speaking = False
+        embed = discord.Embed(
+            description="🎵 The music queue is now empty. Add more songs with `/play` or `!play`!",
+            color=discord.Color.light_grey()
+        )
+        await text_channel.send(embed=embed)
+        return
     else:
         player.current = None
         player.previous_song = None
@@ -430,6 +496,7 @@ async def stop(interaction: discord.Interaction):
     player.loop = False
     player.current = None
     player.previous_song = None
+    player.history.clear()
     player.is_dj_speaking = False
     player.skip_interrupted = False
 
@@ -576,11 +643,26 @@ async def dj_sub_status(interaction: discord.Interaction):
     voice_name = player.voice_preset or "Default (Christopher - DJ X)"
     embed = discord.Embed(title=f"🎙️ {DJ_NAME} Status", color=discord.Color.from_rgb(30, 215, 96))
     embed.add_field(name="State", value=f"**{state}**", inline=True)
+    embed.add_field(name="Autoplay", value=f"**{'Enabled' if player.autoplay else 'Disabled'}**", inline=True)
     embed.add_field(name="Frequency", value=f"Every **{player.dj_frequency}** track(s)", inline=True)
     embed.add_field(name="Voice", value=f"`{voice_name}`", inline=True)
     await interaction.response.send_message(embed=embed)
 
+@dj_group.command(name="autoplay", description="Toggle endless Autoplay mode when the queue is empty")
+async def dj_sub_autoplay(interaction: discord.Interaction):
+    player = get_player(interaction.guild_id)
+    player.autoplay = not player.autoplay
+    state = "Enabled" if player.autoplay else "Disabled"
+    await interaction.response.send_message(f"🔄 Endless Autoplay is now **{state}**.")
+
 bot.tree.add_command(dj_group)
+
+@bot.tree.command(name="autoplay", description="Toggle endless Autoplay mode when the queue ends")
+async def autoplay_cmd(interaction: discord.Interaction):
+    player = get_player(interaction.guild_id)
+    player.autoplay = not player.autoplay
+    state = "Enabled" if player.autoplay else "Disabled"
+    await interaction.response.send_message(f"🔄 Endless Autoplay is now **{state}**.")
 
 @bot.tree.command(name="djplay", description="Quick shortcut: Start DJ X with a curated vibe or genre")
 @app_commands.describe(vibe="Music genre or vibe (e.g. 'hip hop', 'chill', 'rock', 'pop', 'today's hits')")
@@ -626,6 +708,7 @@ async def prefix_stop(ctx: commands.Context):
     player.loop = False
     player.current = None
     player.previous_song = None
+    player.history.clear()
     player.is_dj_speaking = False
     player.skip_interrupted = False
 
@@ -671,6 +754,13 @@ async def prefix_loop(ctx: commands.Context):
     state = "Enabled" if player.loop else "Disabled"
     await ctx.send(f"🔁 Repeat mode is now **{state}**.")
 
+@bot.command(name="autoplay", aliases=["ap"])
+async def prefix_autoplay(ctx: commands.Context):
+    player = get_player(ctx.guild.id)
+    player.autoplay = not player.autoplay
+    state = "Enabled" if player.autoplay else "Disabled"
+    await ctx.send(f"🔄 Endless Autoplay is now **{state}**.")
+
 @bot.command(name="dj")
 async def prefix_dj(ctx: commands.Context, action: Optional[str] = "toggle", *, value: Optional[str] = None):
     player = get_player(ctx.guild.id)
@@ -687,6 +777,11 @@ async def prefix_dj(ctx: commands.Context, action: Optional[str] = "toggle", *, 
         if not user_vc or not user_vc.channel:
             return await ctx.send("❌ You must join a voice channel first to use this command!")
         await handle_dj_speak(ctx.guild, ctx.channel, user_vc, value, ctx.send)
+
+    elif action in ("autoplay", "ap"):
+        player.autoplay = not player.autoplay
+        state = "Enabled" if player.autoplay else "Disabled"
+        await ctx.send(f"🔄 Endless Autoplay is now **{state}**.")
 
     elif action in ("toggle", "t"):
         player.dj_enabled = not player.dj_enabled
@@ -727,9 +822,10 @@ async def prefix_dj(ctx: commands.Context, action: Optional[str] = "toggle", *, 
         voice_name = player.voice_preset or "Default (Christopher - DJ X)"
         embed = discord.Embed(title=f"🎙️ {DJ_NAME} Status", color=discord.Color.from_rgb(30, 215, 96))
         embed.add_field(name="State", value=f"**{state}**", inline=True)
+        embed.add_field(name="Autoplay", value=f"**{'Enabled' if player.autoplay else 'Disabled'}**", inline=True)
         embed.add_field(name="Frequency", value=f"Every **{player.dj_frequency}** track(s)", inline=True)
         embed.add_field(name="Voice", value=f"`{voice_name}`", inline=True)
-        embed.set_footer(text="Usage: !dj [play <vibe>|speak <msg>|toggle|on|off|drop|freq <n>|voice <name>]")
+        embed.set_footer(text="Usage: !dj [play <vibe>|speak <msg>|autoplay|toggle|on|off|drop|freq <n>|voice <name>]")
         await ctx.send(embed=embed)
 
 if __name__ == "__main__":
