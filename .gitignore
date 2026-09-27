@@ -7,6 +7,6 @@ __pycache__/
 .cache*
 mobile_app/node_modules/
 mobile_app/.expo/
-dist/
-build/
+/dist/
+/build/
 *.spec
