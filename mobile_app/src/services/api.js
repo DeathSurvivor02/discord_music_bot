@@ -1,12 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY_SERVER_URL = '@spotify_dj_server_url';
-export const DEFAULT_SERVER_URL = 'http://10.0.0.138:8000';
-export const FALLBACK_TUNNEL_URL = 'https://silly-socks-prove.loca.lt';
+export const DEFAULT_SERVER_URL = 'https://funny-gecko-6.loca.lt';
+export const FALLBACK_TUNNEL_URL = 'https://funny-gecko-6.loca.lt';
 
 const getBrowserOrigin = () => {
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
-    if (window.location.origin.startsWith('http')) return window.location.origin;
+    const o = window.location.origin;
+    // Never treat Metro bundler (port 8081 or exp.direct) as the audio API server
+    if (o.includes(':8081') || o.includes('exp.direct')) {
+      return null;
+    }
+    if (o.startsWith('http')) return o;
   }
   return null;
 };
@@ -16,18 +21,25 @@ let cachedServerUrl = null;
 export const getServerUrl = async () => {
   if (cachedServerUrl) return cachedServerUrl;
   const origin = getBrowserOrigin();
-  if (origin && !origin.includes('localhost:8081')) {
+  if (origin) {
     cachedServerUrl = origin;
     return cachedServerUrl;
   }
   try {
     const saved = await AsyncStorage.getItem(STORAGE_KEY_SERVER_URL);
-    cachedServerUrl = saved || origin || DEFAULT_SERVER_URL;
+    // If saved URL contains 8081 or is outdated LAN HTTP, reset to HTTPS tunnel
+    if (!saved || saved.includes(':8081') || saved.includes('exp.direct') || saved.includes('10.0.0.138') || saved.includes('silly-socks')) {
+      cachedServerUrl = DEFAULT_SERVER_URL;
+      await AsyncStorage.setItem(STORAGE_KEY_SERVER_URL, DEFAULT_SERVER_URL);
+    } else {
+      cachedServerUrl = saved;
+    }
   } catch {
-    cachedServerUrl = origin || DEFAULT_SERVER_URL;
+    cachedServerUrl = DEFAULT_SERVER_URL;
   }
   return cachedServerUrl;
 };
+
 
 
 export const setServerUrl = async (url) => {

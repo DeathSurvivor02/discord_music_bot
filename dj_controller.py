@@ -8,15 +8,59 @@ import edge_tts
 
 from config import GEMINI_API_KEY, DJ_NAME, DJ_VOICE
 
-# Available voice options for user customization
+# Available voice options for user customization with studio broadcast modulation
 DJ_VOICE_PRESETS = {
-    "christopher": "en-US-ChristopherNeural",   # Deep, charismatic, radio broadcaster
-    "eric": "en-US-EricNeural",                 # Energetic, modern upbeat male
-    "guy": "en-US-GuyNeural",                   # Conversational, casual friendly male
-    "jenny": "en-US-JennyNeural",               # Warm, clear, upbeat female
-    "ryan": "en-GB-RyanNeural",                 # Smooth British male radio host
-    "sonia": "en-GB-SoniaNeural"                # Sophisticated British female
+    "x": {
+        "voice": "en-US-BrianMultilingualNeural",
+        "pitch": "-4Hz",
+        "rate": "+4%",
+        "name": "DJ X (Spotify Style)",
+        "desc": "Authentic Spotify DJ X: Charismatic, urban, modern cadence"
+    },
+    "christopher": {
+        "voice": "en-US-ChristopherNeural",
+        "pitch": "-5Hz",
+        "rate": "+2%",
+        "name": "Deep FM Broadcaster",
+        "desc": "Bass-boosted studio microphone, late night radio presenter"
+    },
+    "andrew": {
+        "voice": "en-US-AndrewMultilingualNeural",
+        "pitch": "-3Hz",
+        "rate": "+3%",
+        "name": "Smooth Host",
+        "desc": "Warm, engaging, contemporary podcast style"
+    },
+    "steffan": {
+        "voice": "en-US-SteffanNeural",
+        "pitch": "-4Hz",
+        "rate": "+2%",
+        "name": "Midnight Baritone",
+        "desc": "Low-frequency, relaxed, deep baritone radio voice"
+    },
+    "roger": {
+        "voice": "en-US-RogerNeural",
+        "pitch": "-2Hz",
+        "rate": "+6%",
+        "name": "Hype Club DJ",
+        "desc": "High energy, punchy and fast-paced"
+    },
+    "ryan": {
+        "voice": "en-GB-RyanNeural",
+        "pitch": "-3Hz",
+        "rate": "+4%",
+        "name": "UK 1Xtra",
+        "desc": "Smooth British radio presenter"
+    },
+    "ava": {
+        "voice": "en-US-AvaMultilingualNeural",
+        "pitch": "-2Hz",
+        "rate": "+3%",
+        "name": "Ava (Female DJ)",
+        "desc": "Crisp, modern, melodic female host"
+    }
 }
+
 
 def clean_track_title(title: str) -> str:
     """Cleans YouTube noise like '(Official Video)', '[4K]', 'feat.' for natural speech."""
@@ -149,19 +193,27 @@ class DJController:
         return random.choice(templates)
 
     async def synthesize_speech(self, text: str, output_path: str, voice: Optional[str] = None) -> bool:
-        """Converts text to speech using edge-tts and writes to an MP3 file."""
-        selected_voice = voice or DJ_VOICE or "en-US-ChristopherNeural"
-        # Check if the passed voice is a preset key (e.g. 'eric' -> 'en-US-EricNeural')
-        if selected_voice.lower() in DJ_VOICE_PRESETS:
-            selected_voice = DJ_VOICE_PRESETS[selected_voice.lower()]
+        """Converts text to speech using edge-tts with radio broadcast pitch & rate tuning."""
+        voice_key = (voice or DJ_VOICE or "x").lower()
+        preset = DJ_VOICE_PRESETS.get(voice_key)
+
+        if preset:
+            selected_voice = preset["voice"]
+            pitch = preset.get("pitch", "-4Hz")
+            rate = preset.get("rate", "+3%")
+        else:
+            selected_voice = voice_key if "neural" in voice_key else "en-US-BrianMultilingualNeural"
+            pitch = "-4Hz"
+            rate = "+3%"
 
         try:
-            communicate = edge_tts.Communicate(text, selected_voice)
+            communicate = edge_tts.Communicate(text, selected_voice, pitch=pitch, rate=rate)
             await communicate.save(output_path)
             return os.path.exists(output_path) and os.path.getsize(output_path) > 0
         except Exception as e:
             print(f"[DJ Controller] TTS synthesis failed: {e}")
             return False
+
 
     async def get_dj_audio_clip(
         self,

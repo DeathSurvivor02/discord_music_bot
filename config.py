@@ -13,7 +13,7 @@ BOT_PREFIX = os.getenv("BOT_PREFIX", "!")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DJ_ENABLED_BY_DEFAULT = os.getenv("DJ_ENABLED", "true").lower() in ("true", "1", "yes")
 DJ_NAME = os.getenv("DJ_NAME", "DJ X")
-DJ_VOICE = os.getenv("DJ_VOICE", "en-US-ChristopherNeural")
+DJ_VOICE = os.getenv("DJ_VOICE", "x")
 DJ_DEFAULT_FREQUENCY = int(os.getenv("DJ_FREQUENCY", "2"))
 AUTOPLAY_BY_DEFAULT = os.getenv("AUTOPLAY", "true").lower() in ("true", "1", "yes")
 

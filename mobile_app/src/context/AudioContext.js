@@ -1,6 +1,105 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as api from '../services/api';
+
+class WebAudioPlayer {
+  constructor(source, options = {}) {
+    const uri = typeof source === 'string' ? source : (source ? source.uri : '');
+    this.audio = new Audio(uri);
+    this.audio.preload = 'auto';
+    this.interval = options.updateInterval || 500;
+    this.listeners = new Set();
+    this.lastEmitTime = 0;
+
+    this.audio.ontimeupdate = () => {
+      const now = this.audio.currentTime;
+      if (Math.abs(now - this.lastEmitTime) >= (this.interval / 1000)) {
+        this.lastEmitTime = now;
+        this._emit({
+          currentTime: this.audio.currentTime,
+          duration: this.audio.duration || 0,
+          playing: !this.audio.paused,
+          didJustFinish: false,
+        });
+      }
+    };
+
+    this.audio.onended = () => {
+      this._emit({
+        currentTime: this.audio.currentTime,
+        duration: this.audio.duration || 0,
+        playing: false,
+        didJustFinish: true,
+      });
+    };
+
+    this.audio.onplay = () => {
+      this._emit({
+        currentTime: this.audio.currentTime,
+        duration: this.audio.duration || 0,
+        playing: true,
+        didJustFinish: false,
+      });
+    };
+
+    this.audio.onpause = () => {
+      this._emit({
+        currentTime: this.audio.currentTime,
+        duration: this.audio.duration || 0,
+        playing: false,
+        didJustFinish: false,
+      });
+    };
+
+    this.audio.onerror = (e) => {
+      console.warn('Web Audio error:', e);
+      this._emit({ error: e, playing: false });
+    };
+  }
+
+  play() {
+    return this.audio.play().catch((err) => {
+      console.warn('HTML5 audio play error:', err);
+    });
+  }
+
+  pause() {
+    this.audio.pause();
+  }
+
+  seekTo(seconds) {
+    this.audio.currentTime = seconds;
+  }
+
+  addListener(eventName, cb) {
+    if (eventName === 'playbackStatusUpdate') {
+      this.listeners.add(cb);
+    }
+    return {
+      remove: () => this.listeners.delete(cb),
+    };
+  }
+
+  _emit(status) {
+    for (const cb of this.listeners) {
+      try { cb(status); } catch {}
+    }
+  }
+
+  remove() {
+    this.listeners.clear();
+    this.audio.pause();
+    this.audio.src = '';
+  }
+}
+
+const buildAudioPlayer = (source, options) => {
+  if (Platform.OS === 'web') {
+    return new WebAudioPlayer(source, options);
+  }
+  return createAudioPlayer(source, options);
+};
 
 const AudioContext = createContext(null);
 
@@ -29,13 +128,15 @@ export const AudioProvider = ({ children }) => {
   // Initialize Audio Mode for mobile
   useEffect(() => {
     const initAudio = async () => {
-      try {
-        await setAudioModeAsync({
-          playsInSilentMode: true,
-          shouldPlayInBackground: true,
-        });
-      } catch (e) {
-        console.warn('Audio mode error:', e);
+      if (Platform.OS !== 'web') {
+        try {
+          await setAudioModeAsync({
+            playsInSilentMode: true,
+            shouldPlayInBackground: true,
+          });
+        } catch (e) {
+          console.warn('Audio mode error:', e);
+        }
       }
     };
     initAudio();
@@ -95,7 +196,7 @@ export const AudioProvider = ({ children }) => {
       setDjSubtitle(subtitleText || 'DJ X on the air...');
       const fullUrl = await api.getFullAudioUrl(audioUrl);
 
-      const djPlayer = createAudioPlayer({ uri: fullUrl }, { updateInterval: 250 });
+      const djPlayer = buildAudioPlayer({ uri: fullUrl }, { updateInterval: 250 });
       djPlayerRef.current = djPlayer;
 
       await new Promise((resolve) => {
@@ -165,8 +266,8 @@ export const AudioProvider = ({ children }) => {
         throw new Error('No stream URL available');
       }
 
-      // 3. Play the music stream using native expo-audio
-      const player = createAudioPlayer({ uri: streamUrl }, { updateInterval: 500 });
+      // 3. Play the music stream using unified audio player
+      const player = buildAudioPlayer({ uri: streamUrl }, { updateInterval: 500 });
       musicPlayerRef.current = player;
 
       const sub = player.addListener('playbackStatusUpdate', (status) => {
