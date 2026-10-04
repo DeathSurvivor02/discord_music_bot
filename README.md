@@ -1,85 +1,78 @@
-# Discord Music Bot 🎵
+# Discord Music Bot
 
-A feature-rich Discord music bot built with **discord.py (v2.x)**, **yt-dlp**, and **spotipy**. Supports audio streaming from **YouTube** and metadata conversion from **Spotify** (tracks, playlists, and albums), with full **interactive Discord UI button controls**.
-
----
-
-## ✨ Features
-
-- 🎙️ **Spotify-Style AI DJ ("DJ X")**: Dynamic radio commentary spoken directly into your voice channel before tracks! Powered by neural text-to-speech with optional Google Gemini banter generation and customizable voice presets.
-- 🎧 **YouTube Streaming**: Stream any YouTube video, playlist, or plain-text search query.
-- 🟢 **Spotify Integration**: Resolves Spotify tracks, playlists, and albums into high-quality YouTube audio streams.
-- 🎛️ **Interactive Controls**: Buttons directly on the "Now Playing" embed:
-  - ⏯️ **Play / Pause**
-  - ⏭️ **Skip**
-  - ⏹️ **Stop & Disconnect**
-  - 🔁 **Repeat / Loop**
-  - 📜 **Queue Preview**
-  - 🎧 **DJ: ON / OFF Toggle**
-- ⚡ **Slash Commands**: Modern Discord commands (`/play`, `/skip`, `/stop`, `/nowplaying`, `/queue`, `/loop`, `/volume`, `/dj`).
-- 🔊 **Volume Control**: Dynamic volume transformer (`/volume <1-100>`).
+A Discord music bot that plays songs from YouTube and Spotify, with an optional Spotify-style "AI DJ" that hops on the mic between tracks to introduce songs.
 
 ---
 
-## 🚀 Setup & Installation
+## What It Does
 
-### Prerequisites
-1. **Python 3.10+** (Tested on Python 3.11).
-2. **FFmpeg** on system PATH:
-   - **Windows**: `winget install Gyan.FFmpeg`
-   - **macOS**: `brew install ffmpeg`
-   - **Linux**: `sudo apt install ffmpeg`
+- **Plays Music:** Drop a YouTube link, Spotify link (song, album, or playlist), or just type song names to search and play.
+- **AI DJ:** Talks in voice chat between songs like a radio DJ. Uses Edge TTS voices (Christopher, Eric, Guy, Jenny, Ryan, Sonia) and can use Google Gemini to write quick commentary about the artists.
+- **On-Screen Buttons:** Skip, pause, resume, loop, and view the queue right from the embed buttons in chat without typing commands.
+- **Autoplay:** Keeps the music going with recommendations when your queue runs out.
+- **Web & Mobile Companion:** Includes a local FastAPI server and a lightweight web player if you want to listen outside Discord.
 
-### 1. Clone the Repository
+---
+
+## Setup
+
+### 1. Prerequisites
+- **Python 3.10+**
+- **FFmpeg** installed and added to your PATH:
+  - Windows: `winget install Gyan.FFmpeg`
+  - Mac: `brew install ffmpeg`
+  - Linux: `sudo apt install ffmpeg`
+
+### 2. Install
 ```bash
 git clone https://github.com/DeathSurvivor02/discord_music_bot.git
 cd discord_music_bot
-```
 
-### 2. Set Up Virtual Environment & Dependencies
-```bash
+# Create and activate virtual environment
 python -m venv .venv
 
 # Windows
 .\.venv\Scripts\activate
 
-# macOS / Linux
+# Mac / Linux
 source .venv/bin/activate
 
 pip install -r requirements.txt
 ```
 
-### 3. Configure Credentials
+### 3. Add Your Keys
 Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-Fill in your API credentials in `.env`:
-- **DISCORD_TOKEN**: From [Discord Developer Portal](https://discord.com/developers/applications)
-  - Ensure **Message Content Intent** and **Server Members Intent** are enabled under Privileged Gateway Intents.
-- **SPOTIFY_CLIENT_ID** & **SPOTIFY_CLIENT_SECRET**: From [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-- **GEMINI_API_KEY** *(Optional)*: From [Google AI Studio](https://aistudio.google.com/) for dynamic AI DJ commentary scriptwriting.
+
+Open `.env` and fill in:
+- `DISCORD_TOKEN`: From the [Discord Developer Portal](https://discord.com/developers/applications). Make sure to turn on **Message Content Intent** and **Server Members Intent** under your bot settings.
+- `SPOTIFY_CLIENT_ID` & `SPOTIFY_CLIENT_SECRET`: Free from the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
+- `GEMINI_API_KEY` *(Optional)*: Free from [Google AI Studio](https://aistudio.google.com/) if you want the DJ to write custom intro banter. If omitted, the DJ uses built-in radio lines.
 
 ---
 
-## 🎮 Running the Bot
+## Running the Bot
 
 ```bash
 python bot.py
 ```
 
-### Commands in Discord
-- `/play <query>`: Play a song from YouTube, Spotify, or a search term.
-- `/skip`: Skip the current song.
-- `/stop`: Clear the queue and leave voice.
-- `/nowplaying`: Display the current track with control buttons.
-- `/queue`: View upcoming songs in queue.
-- `/loop`: Toggle repeating the active song.
-- `/volume <1-100>`: Set playback volume.
-- `/dj <action>`: Manage AI DJ commentary (`toggle`, `drop`, `frequency`, `voice`, `status`).
-  - *Voices available*: `christopher` (default radio host), `eric` (energetic), `guy` (conversational), `jenny` (warm female), `ryan` (British radio host), `sonia` (British female).
+### Discord Commands
+- `/play <query>`: Play a song, playlist, or search term
+- `/skip`: Skip to the next track
+- `/stop`: Stop music and disconnect from voice
+- `/nowplaying`: Shows what's currently playing with control buttons
+- `/queue`: See what's coming up next
+- `/loop`: Repeat the current song
+- `/volume <1-100>`: Change volume
+- `/dj toggle`: Turn the AI DJ on or off
+- `/dj voice <name>`: Pick a DJ voice (`christopher`, `eric`, `guy`, `jenny`, `ryan`, `sonia`)
+- `/dj drop`: Force the DJ to talk right before the next song
 
 ---
 
-## 🛡️ License
-MIT License.
+## License
+
+[MIT](LICENSE)
